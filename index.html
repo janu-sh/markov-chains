@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Markov Chain Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@9/dist/mermaid.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'VT323', monospace;
+            background-color: #040c18;
+            color: #00ffff;
+            overflow: hidden; /* Hide body scrollbars as canvas will be fixed */
+        }
+
+        #background-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -2;
+        }
+
+        /* CRT scan line effect */
+        body::after {
+            content: " ";
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.3) 1px, transparent 1px, transparent 3px);
+            z-index: -1;
+            pointer-events: none;
+            animation: flicker 0.1s infinite;
+        }
+
+        @keyframes flicker {
+            0% { opacity: 0.6; }
+            50% { opacity: 0.5; }
+            100% { opacity: 0.6; }
+        }
+        
+        .main-container {
+            height: 100vh;
+            overflow-y: auto;
+        }
+
+        .text-glow {
+            text-shadow: 0 0 8px #00ffff;
+        }
+        .box-glow {
+            box-shadow: 0 0 12px #00ffff;
+        }
+        
+        .node.active-node > rect,
+        .node.active-node > circle,
+        .node.active-node > polygon {
+            stroke: #ff00ff !important; /* Bright magenta for highlight */
+            stroke-width: 4px !important;
+            filter: drop-shadow(0 0 5px #ff00ff);
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #040c18; }
+        ::-webkit-scrollbar-thumb { background: #008f8f; }
+        ::-webkit-scrollbar-thumb:hover { background: #00ffff; }
+
+        /* Custom slider styles */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]:focus { outline: none; }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #00ffff;
+            box-shadow: 0 0 4px #00ffff;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            height: 20px;
+            width: 10px;
+            background: #00ffff;
+            border: 2px solid #040c18;
+            cursor: pointer;
+            -webkit-appearance: none;
+            margin-top: -8px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="background-canvas"></canvas>
+    <div class="main-container container mx-auto p-4 lg:p-8">
+        <header class="text-center mb-8">
+            <h1 class="text-5xl text-glow">Markov Chain Simulator</h1>
+            <p class="text-lg text-cyan-300 mt-2">A tool for long-term probability analysis.</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <!-- Left Panel: Controls & Input -->
+            <div class="bg-[#0a1424] bg-opacity-80 border border-cyan-500 p-6 flex flex-col space-y-6">
+                <div>
+                    <label for="mermaid-input" class="block text-lg mb-2 text-cyan-300">Graph Definition:</label>
+                    <textarea id="mermaid-input" class="w-full h-64 bg-black bg-opacity-70 border border-cyan-800 p-3 text-mono text-base focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 transition focus:outline-none"></textarea>
+                </div>
+
+                <div class="flex items-center space-x-4">
+                    <button id="upload-btn" class="w-full bg-transparent hover:bg-cyan-900 border border-cyan-500 text-cyan-300 font-bold py-2 px-4 transition duration-300">
+                        Load File
+                    </button>
+                    <input type="file" id="file-input" class="hidden" accept=".txt, .md, .mermaid">
+                </div>
+                
+                <div>
+                    <label for="speed-slider" class="block text-lg mb-2 text-cyan-300">Simulation Speed: <span id="speed-value" class="font-bold text-cyan-400 text-glow">Max</span></label>
+                    <input id="speed-slider" type="range" min="1" max="100" value="100" class="w-full h-2 appearance-none cursor-pointer">
+                </div>
+
+                <div>
+                    <label for="jump-slider" class="block text-lg mb-2 text-cyan-300">Random Jump Probability: <span id="jump-value" class="font-bold text-cyan-400 text-glow">15%</span></label>
+                    <input id="jump-slider" type="range" min="0" max="100" value="15" class="w-full h-2 appearance-none cursor-pointer">
+                </div>
+                 
+                <div class="grid grid-cols-3 gap-4">
+                    <button id="simulate-btn" class="bg-cyan-500 hover:bg-cyan-600 text-black font-bold py-3 px-4 transition duration-300 col-span-2 text-lg text-glow">
+                        Simulate
+                    </button>
+                    <button id="pause-btn" class="bg-gray-700 hover:bg-gray-600 text-cyan-300 font-bold py-3 px-4 transition duration-300 text-lg" disabled>
+                        Pause
+                    </button>
+                     <button id="reset-btn" class="border border-red-500 text-red-500 hover:bg-red-900 hover:text-red-400 font-bold py-3 px-4 transition duration-300 col-span-3 text-lg" disabled>
+                        Reset
+                    </button>
+                </div>
+                 <div id="error-box" class="hidden p-4 bg-red-900 bg-opacity-80 border border-red-600 text-red-300"></div>
+            </div>
+
+            <!-- Right Panel: Visualization & Stats -->
+            <div class="bg-[#0a1424] bg-opacity-80 border border-cyan-500 p-6">
+                <div>
+                    <h2 class="text-2xl mb-4 text-cyan-300 text-center text-glow">-- State Visualization --</h2>
+                    <div id="graph-container" class="w-full min-h-[300px] bg-black bg-opacity-70 border border-cyan-900 p-4 flex items-center justify-center text-cyan-700">
+                        Awaiting simulation...
+                    </div>
+                </div>
+                <div class="mt-8">
+                    <h2 class="text-2xl mb-4 text-cyan-300 text-center text-glow">-- Probability Distribution --</h2>
+                    <div id="stats-container" class="space-y-3">
+                         <p class="text-center text-cyan-700">Output will be displayed here.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Mermaid Theming ---
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: 'base',
+            themeVariables: {
+                background: '#0a1424',
+                primaryColor: '#0a1424',
+                primaryTextColor: '#00ffff',
+                primaryBorderColor: '#00ffff',
+                lineColor: '#008f8f',
+                edgeLabelBackground: '#0a1424',
+                // CORRECTED: High-contrast text/background for nodes
+                mainBkg: '#00ffff',      // Node fill color: Bright Cyan
+                textColor: '#040c18',      // Node text color: Dark Blue (from body bg)
+            }
+        });
+
+        // --- Animated Canvas Background ---
+        const canvas = document.getElementById('background-canvas');
+        const ctx = canvas.getContext('2d');
+        let time = 0;
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+
+        function drawGrid() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const gridSize = 30;
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.1)';
+            ctx.lineWidth = 1;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = 'rgba(0, 255, 255, 0.2)';
+
+            const timeOffsetX = (time * 5) % gridSize;
+            const timeOffsetY = (time * 3) % gridSize;
+
+            for (let x = -timeOffsetX; x < canvas.width; x += gridSize) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+            }
+            for (let y = -timeOffsetY; y < canvas.height; y += gridSize) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+            }
+            time += 0.1;
+            requestAnimationFrame(drawGrid);
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+        drawGrid();
+
+        // --- App Logic ---
+        const mermaidInput = document.getElementById('mermaid-input');
+        const simulateBtn = document.getElementById('simulate-btn');
+        const pauseBtn = document.getElementById('pause-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const uploadBtn = document.getElementById('upload-btn');
+        const fileInput = document.getElementById('file-input');
+        const jumpSlider = document.getElementById('jump-slider');
+        const jumpValue = document.getElementById('jump-value');
+        const speedSlider = document.getElementById('speed-slider');
+        const speedValue = document.getElementById('speed-value');
+        const graphContainer = document.getElementById('graph-container');
+        const statsContainer = document.getElementById('stats-container');
+        const errorBox = document.getElementById('error-box');
+
+        let simulationInterval = null, nodes = {}, allNodeNames = [], visitCounts = {}, totalSteps = 0, currentState = null, jumpProbability = 0.15, currentBatchSize = 1000, currentDelay = 16;
+        const defaultGraph = `graph TD\n    A[StateA] --0.9--> A\n    A --0.1--> B[StateB]\n    B --0.5--> A\n    B --0.5--> C[StateC]\n    C --1.0--> A`;
+        mermaidInput.value = defaultGraph.trim();
+        
+        uploadBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => mermaidInput.value = e.target.result;
+                reader.readAsText(file);
+            }
+        });
+        
+        jumpSlider.addEventListener('input', (e) => {
+            jumpProbability = parseInt(e.target.value) / 100;
+            jumpValue.textContent = `${e.target.value}%`;
+        });
+        speedSlider.addEventListener('input', (e) => updateSimulationPace(parseInt(e.target.value)));
+        simulateBtn.addEventListener('click', startOrResumeSimulation);
+        pauseBtn.addEventListener('click', pauseSimulation);
+        resetBtn.addEventListener('click', resetSimulation);
+
+        function updateSimulationPace(sliderValue) {
+            const minBatch = 1, maxBatch = 2000, minDelay = 16, maxDelay = 1000;
+            currentBatchSize = Math.max(1, Math.round(Math.pow(maxBatch, (sliderValue - 1) / 99)));
+            currentDelay = maxDelay - (maxDelay - minDelay) * (sliderValue - 1) / 99;
+            if (sliderValue < 25) speedValue.textContent = 'Slow'; else if (sliderValue < 50) speedValue.textContent = 'Moderate'; else if (sliderValue < 75) speedValue.textContent = 'Fast'; else if (sliderValue < 100) speedValue.textContent = 'Very Fast'; else speedValue.textContent = 'Max';
+            if (simulationInterval) {
+                clearInterval(simulationInterval);
+                simulationInterval = setInterval(simulationStep, currentDelay);
+            }
+        }
+        
+        function showError(message) { errorBox.textContent = `Error: ${message}`; errorBox.classList.remove('hidden'); }
+        function clearError() { errorBox.classList.add('hidden'); }
+
+        function parseMermaid(text) {
+            clearError();
+            const localNodes = {}, localAllNodeNames = new Set();
+            const edgeRegex = /(\w+)(?:\[.*?\])?\s*--\s*(?:([\d.]+)\s*-->|-->)\s*(\w+)/g;
+            let match;
+            while ((match = edgeRegex.exec(text)) !== null) {
+                const [, from, probStr, to] = match;
+                const prob = probStr ? parseFloat(probStr) : 1.0;
+                localAllNodeNames.add(from); localAllNodeNames.add(to);
+                if (!localNodes[from]) localNodes[from] = { transitions: [] };
+                localNodes[from].transitions.push({ to, prob });
+            }
+            for (const nodeName in localNodes) {
+                const node = localNodes[nodeName];
+                const totalProb = node.transitions.reduce((sum, t) => sum + t.prob, 0);
+                if (totalProb > 0) node.transitions.forEach(t => t.prob /= totalProb);
+            }
+            if (localAllNodeNames.size === 0) throw new Error("No valid nodes or transitions found.");
+            return { parsedNodes: localNodes, parsedNodeNames: Array.from(localAllNodeNames) };
+        }
+
+        function renderGraph() {
+            return new Promise((resolve, reject) => {
+                try {
+                    mermaid.render('generated-mermaid-graph', mermaidInput.value, (svgCode) => {
+                        graphContainer.innerHTML = svgCode;
+                        resolve();
+                    });
+                } catch (e) {
+                    graphContainer.innerHTML = `<div class="text-red-400">Render failed. Check syntax.</div>`;
+                    showError(e.message);
+                    reject(e);
+                }
+            });
+        }
+
+        function startOrResumeSimulation() {
+            const startLogic = () => {
+                updateSimulationPace(parseInt(speedSlider.value));
+                simulationInterval = setInterval(simulationStep, currentDelay);
+                simulateBtn.textContent = 'Simulate'; simulateBtn.disabled = true;
+                pauseBtn.disabled = false; resetBtn.disabled = false; mermaidInput.disabled = true;
+            };
+            if (simulationInterval) { 
+                simulateBtn.textContent = 'Resume';
+                startLogic(); 
+            } 
+            else {
+                try {
+                    const { parsedNodes, parsedNodeNames } = parseMermaid(mermaidInput.value);
+                    nodes = parsedNodes; allNodeNames = parsedNodeNames;
+                    renderGraph().then(() => {
+                        totalSteps = 0; visitCounts = {};
+                        allNodeNames.forEach(name => visitCounts[name] = 0);
+                        currentState = allNodeNames[Math.floor(Math.random() * allNodeNames.length)];
+                        visitCounts[currentState]++; totalSteps++;
+                        updateVisualization(); updateStats(); startLogic();
+                    }).catch(e => console.error("Render failed.", e));
+                } catch (e) { console.error("Parse failed.", e); showError(e.message); }
+            }
+        }
+
+        function pauseSimulation() {
+            clearInterval(simulationInterval); simulationInterval = null;
+            simulateBtn.textContent = 'Resume'; simulateBtn.disabled = false;
+        }
+
+        function resetSimulation() {
+            pauseSimulation();
+            nodes = {}; allNodeNames = []; visitCounts = {}; totalSteps = 0; currentState = null;
+            graphContainer.innerHTML = 'Awaiting simulation...';
+            statsContainer.innerHTML = '<p class="text-center text-cyan-700">Output will be displayed here.</p>';
+            simulateBtn.textContent = 'Simulate';
+            simulateBtn.disabled = false; pauseBtn.disabled = true; resetBtn.disabled = true; mermaidInput.disabled = false;
+            clearError();
+        }
+
+        function simulationStep() {
+            for (let i = 0; i < currentBatchSize; i++) {
+                let nextState;
+                if (Math.random() < jumpProbability) { nextState = allNodeNames[Math.floor(Math.random() * allNodeNames.length)]; } 
+                else {
+                    const possibleTransitions = nodes[currentState]?.transitions;
+                    if (!possibleTransitions || possibleTransitions.length === 0) { nextState = allNodeNames[Math.floor(Math.random() * allNodeNames.length)]; } 
+                    else {
+                        let rand = Math.random(), cumulativeProb = 0;
+                        for (const transition of possibleTransitions) {
+                            cumulativeProb += transition.prob;
+                            if (rand < cumulativeProb) { nextState = transition.to; break; }
+                        }
+                        if (nextState === undefined) nextState = possibleTransitions[possibleTransitions.length - 1].to;
+                    }
+                }
+                if (nextState) { currentState = nextState; visitCounts[currentState]++; } 
+                else if (allNodeNames.length > 0) { currentState = allNodeNames[Math.floor(Math.random() * allNodeNames.length)]; visitCounts[currentState]++; }
+            }
+            totalSteps += currentBatchSize;
+            updateVisualization(); updateStats();
+        }
+
+        function updateVisualization() {
+            const svg = d3.select("#graph-container svg"); if (svg.empty()) return;
+            svg.selectAll('.node').classed('active-node', false);
+            svg.select(`#${currentState}`).classed('active-node', true);
+            svg.selectAll('.node').filter(function() { return d3.select(this).text() === currentState; }).classed('active-node', true);
+        }
+
+        function updateStats() {
+            statsContainer.innerHTML = '';
+            const sortedNodes = allNodeNames.slice().sort();
+            for (const nodeName of sortedNodes) {
+                const count = visitCounts[nodeName] || 0;
+                const percentage = totalSteps > 0 ? (count / totalSteps * 100).toFixed(2) : "0.00";
+                const statEl = document.createElement('div');
+                statEl.className = 'flex items-center justify-between bg-black bg-opacity-50 border border-cyan-900 p-3';
+                statEl.innerHTML = `
+                    <span class="font-semibold text-cyan-300">${nodeName}</span>
+                    <div class="flex items-center space-x-2">
+                        <div class="w-24 bg-black border border-cyan-800 h-2.5">
+                            <div class="bg-cyan-500 h-full" style="width: ${percentage}%"></div>
+                        </div>
+                        <span class="font-mono text-sm text-cyan-400 w-16 text-right">${percentage}%</span>
+                    </div>`;
+                statsContainer.appendChild(statEl);
+            }
+        }
+    </script>
+</body>
+</html>
